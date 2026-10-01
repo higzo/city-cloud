@@ -818,10 +818,12 @@ names[k]<!DOCTYPE html>
       }
     }
 
-    addEventListener('keydown', e => {
-      if (e.code !== 'Space') return;
-      e.preventDefault();
-      if (e.repeat || state !== 'ready') return;
+    // Touch devices have no space bar: the prompt says "press here" and a tap anywhere starts the round.
+    const touchOnly = matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+    if (touchOnly) greetingEl.firstChild.textContent = 'press here';
+
+    function startRound() {
+      if (state !== 'ready') return;
       if (!words.length) spawnCities();
       state = 'running';
       lettersTotal = Math.max(1, words.reduce((n, w) => n + w.el.textContent.length, 0));
@@ -834,6 +836,16 @@ names[k]<!DOCTYPE html>
       last = performance.now();
       acc = 0;
       requestAnimationFrame(loop);
+    }
+
+    addEventListener('keydown', e => {
+      if (e.code !== 'Space') return;
+      e.preventDefault();
+      if (!e.repeat) startRound();
+    });
+    addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' || e.target.closest('#search')) return; // mouse users press space; let the search link work
+      startRound();
     });
   </script>
 </body>
