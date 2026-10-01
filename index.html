@@ -1,0 +1,840 @@
+names[k]<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hello</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: sans-serif;
+      background: #05001a;
+    }
+    #greeting {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      color: #fff;
+      opacity: 1;
+      text-transform: uppercase;
+      text-shadow: 0 2px 12px rgba(5, 0, 26, 0.85);
+      pointer-events: none;
+      transition: opacity 2s;
+    }
+    #search {
+      display: none; position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%);
+      color: #fff; font-size: 1rem; text-shadow: 0 2px 8px rgba(5, 0, 26, 0.9);
+    }
+    #search.show { display: block; }
+    #greeting span { animation: blink 2.6s ease-in-out infinite; } /* slow blink; the fade is on #greeting */
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+    #greeting.hidden { opacity: 0; }
+    #cities { position: fixed; inset: 0; overflow: hidden; z-index: -1; pointer-events: none; }
+    #cities span {
+      position: absolute; left: 0; top: 0; white-space: pre; line-height: 1;
+      text-shadow: 0 0 var(--glow) currentColor, 0 1px 3px rgba(5, 0, 26, 0.9);
+    }
+
+    /* Synthwave scene: sky, scanlines, stars, horizon at 70%, neon grid floor */
+    #sky, #stars, #floor { position: fixed; left: 0; right: 0; pointer-events: none; z-index: -3; }
+    #sky {
+      top: 0; height: 70%;
+      background:
+        repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.14) 0 1px, transparent 1px 4px),
+        linear-gradient(to bottom, rgba(5, 0, 26, 0) 30%, rgba(5, 0, 26, 0.3) 62%, rgba(5, 0, 26, 0.12) 100%),
+        linear-gradient(to bottom, #05001a 0%, #4b0a8f 35%, #b0129c 60%, #ff9a1f 85%, #ffe45c 100%);
+    }
+    #stars { top: 0; height: 70%; overflow: hidden; }
+    #stars i {
+      position: absolute; border-radius: 50%;
+      background: var(--c); box-shadow: 0 0 6px 1px var(--c);
+      animation: twinkle var(--d) ease-in-out var(--delay) infinite alternate;
+    }
+    @keyframes twinkle { from { opacity: 0.15; } to { opacity: 1; } }
+    #floor {
+      top: 70%; bottom: 0; overflow: hidden;
+      perspective: 300px; perspective-origin: 50% 0;
+      background: linear-gradient(to bottom, #2a0a4a, #0d0221);
+    }
+    #floor::before { /* horizon glow line */
+      content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; z-index: 1;
+      background: #ffe45c; box-shadow: 0 0 18px 4px #ff2bd6;
+    }
+    #grid {
+      position: absolute; left: -150%; width: 400%; top: 0; height: 300px;
+      transform-origin: 50% 0; transform: rotateX(70deg);
+      background-image:
+        linear-gradient(rgba(255, 43, 214, 0.9) 2px, transparent 2px),
+        linear-gradient(90deg, rgba(178, 102, 255, 0.9) 2px, transparent 2px);
+      background-size: 60px 60px;
+      filter: drop-shadow(0 0 4px #ff2bd6);
+    }
+  </style>
+</head>
+<body>
+  <div id="sky"></div>
+  <div id="stars"></div>
+  <div id="floor"><div id="grid"></div></div>
+  <div id="cities"></div>
+  <div id="greeting"><span>press space</span></div>
+  <a id="search" target="_blank" rel="noopener"></a>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script>
+    const { Engine, Bodies, Body, Composite, Events } = Matter;
+    // Pool of well-known cities (ASCII, up to 16 characters). Each round draws COUNT distinct ones.
+    const CITY_POOL = `
+      Tokyo, Osaka, Kyoto, Yokohama, Nagoya, Sapporo, Kobe, Fukuoka, Hiroshima, Sendai, Nara, Kawasaki, Saitama,
+      Kitakyushu, Niigata, Okayama, Kumamoto, Kanazawa, Nagasaki, Shizuoka, Hamamatsu, Matsuyama, Naha, Kagoshima,
+      Chiba, Hachioji, Himeji, Utsunomiya, Kurashiki, Matsumoto, Nikko, Takamatsu, Seoul, Busan, Incheon, Daegu,
+      Daejeon, Gwangju, Ulsan, Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Tianjin, Wuhan,
+      Hangzhou, Nanjing, Xian, Suzhou, Shenyang, Harbin, Qingdao, Dalian, Zhengzhou, Changsha, Kunming, Xiamen,
+      Fuzhou, Ningbo, Jinan, Hefei, Nanchang, Guiyang, Nanning, Lanzhou, Urumqi, Lhasa, Hohhot, Taiyuan,
+      Shijiazhuang, Changchun, Wuxi, Dongguan, Foshan, Hong Kong, Macau, Taipei, Kaohsiung, Taichung, Tainan,
+      Ulaanbaatar, Haikou, Sanya, Guilin, Lijiang, Dali, Yinchuan, Xining, Datong, Luoyang, Kaifeng, Bangkok,
+      Chiang Mai, Phuket, Pattaya, Hanoi, Da Nang, Hue, Haiphong, Hoi An, Nha Trang, Phnom Penh, Siem Reap,
+      Vientiane, Luang Prabang, Yangon, Mandalay, Naypyidaw, Kuala Lumpur, George Town, Johor Bahru, Malacca,
+      Kuching, Kota Kinabalu, Singapore, Jakarta, Surabaya, Bandung, Medan, Semarang, Yogyakarta, Denpasar,
+      Makassar, Palembang, Manila, Quezon City, Cebu, Davao, Dili, Ayutthaya, Krabi, Koh Samui, Chiang Rai, Udon
+      Thani, Khon Kaen, Can Tho, Vung Tau, Dalat, Sapa, Ipoh, Shah Alam, Putrajaya, Langkawi, Miri, Sandakan,
+      Batam, Malang, Bogor, Depok, Bekasi, Tangerang, Manado, Delhi, Mumbai, Kolkata, Chennai, Bangalore,
+      Hyderabad, Ahmedabad, Pune, Jaipur, Lucknow, Kanpur, Nagpur, Indore, Bhopal, Patna, Surat, Vadodara, Agra,
+      Varanasi, Amritsar, Chandigarh, Kochi, Coimbatore, Madurai, Goa, Mysore, Shimla, Srinagar, Guwahati,
+      Bhubaneswar, Ranchi, Dehradun, Udaipur, Jodhpur, Meerut, Rajkot, Nashik, Aurangabad, Ludhiana, Jabalpur,
+      Gwalior, Raipur, Vijayawada, Jamshedpur, Dhanbad, Ajmer, Bikaner, Pondicherry, Mangalore, Salem, Thanjavur,
+      Kozhikode, Jammu, Leh, Darjeeling, Gangtok, Shillong, Imphal, Aizawl, Panaji, Karachi, Lahore, Islamabad,
+      Rawalpindi, Faisalabad, Peshawar, Quetta, Multan, Sialkot, Tashkent, Samarkand, Bukhara, Almaty, Astana,
+      Bishkek, Dushanbe, Ashgabat, Baku, Tbilisi, Yerevan, Batumi, Namangan, Andijan, Fergana, Nukus, Khiva,
+      Shymkent, Tehran, Isfahan, Shiraz, Tabriz, Mashhad, Kerman, Yazd, Ahvaz, Qom, Karaj, Rasht, Kermanshah,
+      Hamadan, Baghdad, Basra, Mosul, Erbil, Najaf, Karbala, Kirkuk, Damascus, Aleppo, Homs, Latakia, Hama,
+      Beirut, Sidon, Tyre, Byblos, Amman, Zarqa, Aqaba, Petra, Jerusalem, Tel Aviv, Haifa, Eilat, Beersheba,
+      Netanya, Ashdod, Nablus, Ramallah, Gaza, Bethlehem, Riyadh, Jeddah, Mecca, Medina, Dammam, Taif, Tabuk,
+      Abha, Dubai, Abu Dhabi, Sharjah, Al Ain, Fujairah, Doha, Kuwait City, Manama, Muscat, Salalah, Sohar, Sanaa,
+      Aden, Taiz, London, Manchester, Birmingham, Liverpool, Leeds, Glasgow, Edinburgh, Cardiff, Belfast, Bristol,
+      Newcastle, Sheffield, Nottingham, Oxford, Cambridge, Brighton, Bath, York, Aberdeen, Southampton,
+      Portsmouth, Plymouth, Leicester, Coventry, Derby, Norwich, Exeter, Swansea, Dundee, Inverness, Stirling,
+      Lancaster, Canterbury, Chester, Durham, Salisbury, Blackpool, Hull, Bradford, Sunderland, Paris, Marseille,
+      Lyon, Toulouse, Nice, Nantes, Strasbourg, Bordeaux, Lille, Montpellier, Rennes, Cannes, Avignon, Grenoble,
+      Dijon, Reims, Le Havre, Toulon, Nimes, Angers, Tours, Limoges, Amiens, Rouen, Caen, Orleans, Berlin,
+      Hamburg, Munich, Cologne, Frankfurt, Stuttgart, Dusseldorf, Dortmund, Essen, Leipzig, Bremen, Dresden,
+      Hanover, Nuremberg, Heidelberg, Bonn, Mannheim, Karlsruhe, Freiburg, Augsburg, Wiesbaden, Mainz, Kiel,
+      Lubeck, Rostock, Magdeburg, Erfurt, Madrid, Barcelona, Valencia, Seville, Zaragoza, Malaga, Bilbao, Granada,
+      Palma, Alicante, Cordoba, Toledo, Salamanca, San Sebastian, Murcia, Valladolid, Vigo, Gijon, Cadiz, Almeria,
+      Santander, Pamplona, Burgos, Oviedo, Badajoz, Girona, Tarragona, Lleida, Huelva, Jerez, Ibiza, Rome, Milan,
+      Naples, Turin, Florence, Venice, Bologna, Genoa, Palermo, Verona, Pisa, Bari, Catania, Siena, Trieste,
+      Padua, Parma, Modena, Perugia, Livorno, Ravenna, Rimini, Cagliari, Sassari, Lecce, Taranto, Salerno,
+      Messina, Syracuse, Bergamo, Brescia, Como, Amsterdam, Rotterdam, The Hague, Utrecht, Eindhoven, Groningen,
+      Maastricht, Leiden, Haarlem, Delft, Arnhem, Breda, Tilburg, Brussels, Antwerp, Ghent, Bruges, Liege, Namur,
+      Leuven, Charleroi, Mechelen, Luxembourg, Zurich, Geneva, Bern, Basel, Lausanne, Lucerne, Stockholm,
+      Gothenburg, Malmo, Uppsala, Linkoping, Vasteras, Orebro, Norrkoping, Lund, Oslo, Bergen, Trondheim,
+      Stavanger, Kristiansand, Tromso, Alesund, Copenhagen, Aarhus, Odense, Esbjerg, Aalborg, Helsinki, Tampere,
+      Turku, Oulu, Espoo, Vaasa, Rovaniemi, Reykjavik, Warsaw, Krakow, Gdansk, Wroclaw, Poznan, Lodz, Gdynia,
+      Szczecin, Lublin, Katowice, Prague, Brno, Ostrava, Bratislava, Kosice, Budapest, Debrecen, Pecs, Szeged,
+      Bucharest, Cluj Napoca, Timisoara, Iasi, Constanta, Brasov, Sofia, Plovdiv, Varna, Burgas, Belgrade, Nis,
+      Novi Sad, Zagreb, Split, Dubrovnik, Ljubljana, Maribor, Sarajevo, Mostar, Banja Luka, Skopje, Ohrid, Tirana,
+      Moscow, Saint Petersburg, Novosibirsk, Yekaterinburg, Kazan, Samara, Omsk, Sochi, Vladivostok, Rostov on
+      Don, Volgograd, Perm, Ufa, Krasnoyarsk, Voronezh, Krasnodar, Saratov, Tyumen, Irkutsk, Khabarovsk, Murmansk,
+      Arkhangelsk, Kaliningrad, Yaroslavl, Tula, Smolensk, Novgorod, Pskov, Ulyanovsk, Barnaul, Kemerovo, New
+      York, Los Angeles, Chicago, Houston, Phoenix, Philadelphia, San Antonio, San Diego, Dallas, San Jose,
+      Austin, Jacksonville, Fort Worth, Columbus, Charlotte, San Francisco, Indianapolis, Seattle, Denver,
+      Washington, Boston, El Paso, Nashville, Detroit, Oklahoma City, Portland, Las Vegas, Memphis, Louisville,
+      Baltimore, Milwaukee, Albuquerque, Tucson, Fresno, Sacramento, Kansas City, Atlanta, Miami, Omaha, Raleigh,
+      Colorado Springs, Tampa, New Orleans, Cleveland, Honolulu, Minneapolis, Pittsburgh, Cincinnati, St Louis,
+      Orlando, Salt Lake City, Anchorage, Buffalo, Richmond, Boise, Savannah, Charleston, Santa Fe, Reno, Madison,
+      Tulsa, Albany, Providence, Hartford, New Haven, Newark, Jersey City, Norfolk, Greensboro, Knoxville,
+      Chattanooga, Lexington, Little Rock, Jackson, Mobile, Montgomery, Baton Rouge, Shreveport, Lubbock, Corpus
+      Christi, Laredo, Amarillo, Wichita, Des Moines, Sioux Falls, Fargo, Billings, Cheyenne, Spokane, Tacoma,
+      Eugene, Oakland, Long Beach, Anaheim, Santa Barbara, Santa Monica, Palm Springs, Berkeley, Toronto,
+      Montreal, Vancouver, Calgary, Edmonton, Ottawa, Winnipeg, Quebec City, Hamilton, Halifax, Victoria,
+      Saskatoon, Regina, Kelowna, Mississauga, Brampton, Surrey, Laval, Gatineau, Kitchener, Windsor, Oshawa,
+      Kingston, Sudbury, Thunder Bay, Moncton, Fredericton, Charlottetown, St Johns, Mexico City, Guadalajara,
+      Monterrey, Puebla, Tijuana, Cancun, Merida, Oaxaca, Leon, Acapulco, Veracruz, Zacatecas, Queretaro, San Luis
+      Potosi, Chihuahua, Hermosillo, Mazatlan, Cabo San Lucas, Playa del Carmen, Tulum, Morelia, Toluca,
+      Cuernavaca, Villahermosa, Campeche, Chetumal, Guatemala City, Antigua, San Salvador, Tegucigalpa, San Pedro
+      Sula, La Ceiba, Managua, Alajuela, Cartago, Havana, Santiago de Cuba, Santo Domingo, Port au Prince, San
+      Juan, Nassau, Bridgetown, Sao Paulo, Rio de Janeiro, Brasilia, Salvador, Fortaleza, Belo Horizonte, Manaus,
+      Curitiba, Recife, Porto Alegre, Belem, Goiania, Campinas, Florianopolis, Natal, Ribeirao Preto, Santos,
+      Sorocaba, Niteroi, Maceio, Joao Pessoa, Aracaju, Teresina, Sao Luis, Cuiaba, Campo Grande, Palmas, Porto
+      Velho, Rio Branco, Buenos Aires, Rosario, Mendoza, La Plata, Salta, Bariloche, Ushuaia, Mar del Plata,
+      Tucuman, Neuquen, Resistencia, Posadas, Corrientes, Parana, Bahia Blanca, Santiago, Valparaiso, Concepcion,
+      Punta Arenas, Iquique, Antofagasta, La Serena, Temuco, Valdivia, Puerto Montt, Lima, Cusco, Arequipa,
+      Trujillo, Iquitos, Piura, Chiclayo, Huaraz, Puno, Tacna, Ica, Cajamarca, Ayacucho, Bogota, Medellin, Cali,
+      Cartagena, Barranquilla, Santa Marta, Bucaramanga, Pereira, Manizales, Cucuta, Ibague, Pasto, Caracas,
+      Maracaibo, Barquisimeto, Maracay, Cairo, Alexandria, Giza, Luxor, Aswan, Port Said, Suez, Hurghada, Tanta,
+      Mansoura, Casablanca, Rabat, Marrakech, Fez, Tangier, Agadir, Meknes, Essaouira, Chefchaouen, Tetouan,
+      Oujda, Algiers, Oran, Constantine, Annaba, Blida, Bejaia, Setif, Tlemcen, Tunis, Sfax, Sousse, Bizerte,
+      Gabes, Kairouan, Tripoli, Benghazi, Misrata, Tobruk, Khartoum, Omdurman, Port Sudan, Juba, Addis Ababa,
+      Gondar, Lalibela, Dire Dawa, Hargeisa, Mogadishu, Asmara, Djibouti, Nairobi, Mombasa, Kisumu, Nakuru,
+      Eldoret, Kampala, Entebbe, Jinja, Kigali, Dar es Salaam, Zanzibar, Dodoma, Arusha, Mwanza, Moshi, Lusaka,
+      Ndola, Kitwe, Livingstone, Harare, Bulawayo, Mutare, Victoria Falls, Johannesburg, Cape Town, Durban,
+      Pretoria, Port Elizabeth, Bloemfontein, Windhoek, Walvis Bay, Swakopmund, Gaborone, Maputo, Beira, Nampula,
+      Lilongwe, Blantyre, Maseru, Mbabane, Antananarivo, Toamasina, Port Louis, Moroni, Lagos, Abuja, Kano,
+      Ibadan, Port Harcourt, Benin City, Enugu, Kaduna, Maiduguri, Ilorin, Jos, Calabar, Accra, Kumasi, Takoradi,
+      Tamale, Cape Coast, Abidjan, Bouake, Yamoussoukro, Dakar, Thies, Saint Louis, Bamako, Sydney, Melbourne,
+      Brisbane, Perth, Adelaide, Canberra, Hobart, Darwin, Gold Coast, Cairns, Wollongong, Geelong, Auckland,
+      Wellington, Istanbul, Ankara, Dhaka, Vienna, Athens, Dublin, Lisbon, Kyiv, Quito, Kabul, Colombo, Kathmandu,
+      Montevideo, La Paz, Panama City, Tallinn, Riga, Vilnius, Minsk, Pyongyang
+    `;
+    const cityNames = [...new Set(CITY_POOL.split(',').map(s => s.replace(/\s+/g, ' ').trim()).filter(s => s && s.length <= 16))];
+    // n distinct random cities from the pool (partial Fisher-Yates shuffle)
+    function pickCities(n) {
+      const pool = cityNames.slice(), out = [];
+      for (let i = 0; i < n && pool.length; i++) {
+        const k = i + Math.floor(Math.random() * (pool.length - i));
+        [pool[i], pool[k]] = [pool[k], pool[i]];
+        out.push(pool[i]);
+      }
+      return out;
+    }
+    const COUNT = 240;
+    const MIN_SIZE = 8, MAX_SIZE = 64;
+    const STILL_SPEED = 0.2;    // px/tick below which a landed word counts as resting
+    const SETTLE_MS = 500;      // resting time before a word starts to brighten and shrink
+    const BRIGHTEN_MS = 5000;   // time to reach full white
+    const SHRINK_MS = 5000;     // each word loses rate (30-60%) of its original size per this time
+    const VAPOR_SCALE = 0.3;    // base scale below which a word floats up like vapor (each word gets 15-30% more, then x1.3 with +-20% variation)
+    const GONE_SCALE = 0.01;    // below this scale a word is deleted
+    const BREAK_SPEED = 14;     // relative impact speed (px/tick) that can snap a long word
+    const MIN_BREAK_LEN = 7;    // only words at least this long can break
+    const STEP = 1000 / 60;
+
+    const PALETTE = ['#19e3ff', '#ff2bd6', '#b266ff', '#ff5e7a', '#ff9a1f', '#ffe45c', '#f4eaff'];
+    const BRIGHT = [255, 255, 255];
+
+    const rand = (min, max) => Math.random() * (max - min) + min;
+    // blend a palette color towards white by t (0..1)
+    const color = (hex, t) => {
+      const c = [1, 3, 5].map((i, k) => Math.round(parseInt(hex.substr(i, 2), 16) * (1 - t) + BRIGHT[k] * t));
+      return 'rgb(' + c.join(',') + ')';
+    };
+    const citiesEl = document.getElementById('cities');
+    const greetingEl = document.getElementById('greeting');
+    const engine = Engine.create();
+    engine.positionIterations = 10;
+    engine.velocityIterations = 8;
+    const words = [];
+
+    // Twinkling cyan and magenta particles in the sky
+    const starsEl = document.getElementById('stars');
+    for (let i = 0; i < 80; i++) {
+      const s = document.createElement('i'), px = rand(1.5, 3.5);
+      s.style.cssText = 'left:' + rand(0, 100) + '%;top:' + rand(0, 100) + '%;width:' + px + 'px;height:' + px + 'px;' +
+        '--c:' + (Math.random() < 0.5 ? '#19e3ff' : '#ff2bd6') + ';--d:' + rand(1.5, 4) + 's;--delay:-' + rand(0, 4) + 's';
+      starsEl.appendChild(s);
+    }
+
+    function makeEl(text, size, col, shade) {
+      const el = document.createElement('span');
+      el.textContent = text;
+      el.style.fontSize = size + 'px';
+      el.style.color = color(col, shade);
+      el.style.setProperty('--glow', (8 + 10 * (size - MIN_SIZE) / (MAX_SIZE - MIN_SIZE)) + 'px');
+      citiesEl.appendChild(el);
+      return el;
+    }
+
+    // Rigid body sized to the word's box; mass follows area, so bigger names are heavier.
+    function makeWord(el, size, col, x, y, angle, scale, boxW) {
+      const w = boxW || el.offsetWidth, h = el.offsetHeight;
+      const body = Bodies.rectangle(x, y, w * scale, h * scale, {
+        angle, restitution: 0.15, friction: 0.6, frictionAir: 0.12 / size
+      });
+      const word = {
+        el, body, w, h, size, col, scale, shade: 0,
+        rate: rand(0.3, 0.6), vaporAt: VAPOR_SCALE * rand(1.15, 1.3) * 1.3 * rand(0.8, 1.2), settle: 0, age: 0, started: false, landed: false, vapor: false, lift: 0
+      };
+      body.word = word;
+      words.push(word);
+      Composite.add(engine.world, body);
+      return word;
+    }
+
+    function removeWord(word) {
+      Composite.remove(engine.world, word.body);
+      word.el.remove();
+      words.splice(words.indexOf(word), 1);
+    }
+
+    function render(word) {
+      const b = word.body;
+      word.el.style.transform = 'translate(' + (b.position.x - word.w / 2) + 'px,' +
+        (b.position.y - word.h / 2) + 'px) rotate(' + b.angle + 'rad) scale(' + word.scale + ')';
+    }
+
+    // Random layout, biggest names first, skipping any spot that would overlap a placed word.
+    function spawnCities() {
+      const sizes = Array.from({ length: COUNT },
+        () => Math.round(MIN_SIZE + (MAX_SIZE - MIN_SIZE) * Math.pow(Math.random(), 3)));
+      sizes.sort((a, b) => b - a);
+      const names = pickCities(COUNT); // distinct cities, no duplicates on screen
+      const r = document.createRange();
+      r.selectNodeContents(greetingEl);
+      const gr = r.getBoundingClientRect(), pad = 12;
+      const g = { left: gr.left - pad, right: gr.right + pad, top: gr.top - pad, bottom: gr.bottom + pad };
+      for (const [k, size] of sizes.entries()) {
+        const col = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+        const el = makeEl(names[k], size, col, 0);
+        const w = el.offsetWidth, h = el.offsetHeight;
+        let placed = false;
+        for (let t = 0; t < 300 && !placed; t++) {
+          const x = rand(w / 2, Math.max(w / 2, innerWidth - w / 2));
+          const y = rand(h / 2, Math.max(h / 2, innerHeight - h / 2));
+          // keep clear of the "press space" text
+          if (x + w / 2 > g.left && x - w / 2 < g.right && y + h / 2 > g.top && y - h / 2 < g.bottom) continue;
+          if (!words.some(o => Math.abs(x - o.body.position.x) < (w + o.w) / 2 + 1 &&
+                               Math.abs(y - o.body.position.y) < (h + o.h) / 2 + 1)) {
+            render(makeWord(el, size, col, x, y, 0, 1));
+            placed = true;
+          }
+        }
+        if (!placed) el.remove(); // no free spot left; skip to avoid overlap
+      }
+    }
+    spawnCities();
+
+    // Floor and side walls, rebuilt on resize so the pile rests on the page bottom.
+    let walls = [];
+    function buildWalls() {
+      const W = innerWidth, H = innerHeight, T = 500, opt = { isStatic: true, friction: 0.6 };
+      Composite.remove(engine.world, walls);
+      walls = [
+        Bodies.rectangle(W / 2, H + T / 2, W + 2 * T, T, opt),
+        Bodies.rectangle(-T / 2, H / 2, T, H * 40, opt),
+        Bodies.rectangle(W + T / 2, H / 2, T, H * 40, opt)
+      ];
+      Composite.add(engine.world, walls);
+    }
+    buildWalls();
+    addEventListener('resize', buildWalls);
+
+    // Pick n-1 distinct cut positions inside a string of length len.
+    function randomCuts(len, n) {
+      const pool = Array.from({ length: len - 1 }, (_, i) => i + 1);
+      const cuts = [];
+      while (cuts.length < n - 1) cuts.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+      return cuts.sort((a, b) => a - b);
+    }
+
+    // Track first contact. Words queued to break (word -> cut positions) are split after the step:
+    // hard impacts snap long words in half, and a rising vapor word may shatter a word it hits from
+    // below into groups of letters (the bigger that word, the more likely).
+    const toBreak = new Map();
+    Events.on(engine, 'collisionStart', ev => {
+      for (const { bodyA, bodyB } of ev.pairs) {
+        if (bodyA.word) bodyA.word.landed = true;
+        if (bodyB.word) bodyB.word.landed = true;
+        for (const [v, t] of [[bodyA, bodyB], [bodyB, bodyA]]) {
+          if (!(v.word && v.word.vapor && t.word && !t.word.vapor && t.position.y < v.position.y)) continue;
+          const len = t.word.el.textContent.length, eff = t.word.size * t.word.scale;
+          if (len >= 2 && Math.random() < Math.min(0.9, 1.2 * eff / MAX_SIZE)) {
+            toBreak.set(t.word, randomCuts(len, Math.min(len, 2 + Math.floor(Math.random() * 3))));
+          }
+        }
+        const rel = Math.hypot(bodyA.velocity.x - bodyB.velocity.x, bodyA.velocity.y - bodyB.velocity.y);
+        if (rel < BREAK_SPEED) continue;
+        for (const b of [bodyA, bodyB]) {
+          if (b.word && b.word.scale > 0.5 && b.word.el.textContent.length >= MIN_BREAK_LEN && !toBreak.has(b.word)) {
+            toBreak.set(b.word, [Math.ceil(b.word.el.textContent.length / 2)]);
+          }
+        }
+      }
+    });
+
+    // Split a word at the given cuts; pieces keep the parent's position, tilt, motion and progress.
+    function breakWord(word, cuts) {
+      if (!words.includes(word)) return;
+      const { body, el, size, col, scale } = word;
+      const text = el.textContent, edges = [0, ...cuts, text.length];
+      const parts = edges.slice(1).map((e, i) => text.slice(edges[i], e));
+      el.textContent = parts[0];
+      const els = [el, ...parts.slice(1).map(p => makeEl(p, size, col, word.shade))];
+      // Pieces tile the parent's box exactly (measured widths are rounded up and would overlap
+      // the neighbours, which Matter then shoves apart violently), with 1px gaps between them.
+      const raw = els.map(e => e.offsetWidth);
+      const k = (word.w * scale - (els.length - 1)) / raw.reduce((a, b) => a + b, 0);
+      const ws = raw.map(r => r * k);
+      const ux = Math.cos(body.angle), uy = Math.sin(body.angle);
+      removeWord(word);
+      el.style.transform = '';
+      citiesEl.appendChild(el);
+      let off = -word.w * scale / 2;
+      els.forEach((e, i) => {
+        const o = off + ws[i] / 2, dir = 0.4 * (i - (els.length - 1) / 2);
+        off += ws[i] + 1;
+        const piece = makeWord(e, size, col, body.position.x + ux * o, body.position.y + uy * o, body.angle, scale, ws[i] / scale);
+        Object.assign(piece, {
+          shade: word.shade, rate: word.rate, settle: word.settle, age: word.age,
+          started: word.started, vaporAt: word.vaporAt, landed: true
+        });
+        Body.setVelocity(piece.body, { x: body.velocity.x + ux * dir, y: body.velocity.y + uy * dir });
+        Body.setAngularVelocity(piece.body, body.angularVelocity);
+      });
+    }
+
+    // Pitch as a function of the share of letters still on screen (1 = all, 0 = all gone).
+    // The 0-3% end of the curve is squeezed to 75% of its width (now 0.75-3%), so the drop to 0.3
+    // finishes a bit sooner. The music fades out at MUSIC_END_FRAC instead of playing to the last letter.
+    // The whole ending (the drop to 0.3 and so the start of the finale) is shifted 0.55% later, i.e. when
+    // fewer letters are left on screen.
+    const MUSIC_END_FRAC = 0.004;
+    // Speed-ups (values above 1) are scaled so the highest point is MAX_PITCH; slow-downs are untouched.
+    const MAX_PITCH = 1.35;
+    const PITCH_POINTS = [[0, 0.3], [0.002, 0.3], [0.0095, 0.3], [0.01475, 0.9], [0.02, 1.3], [0.0245, 1.4],
+      [0.045, 1.6], [0.1, 1.55], [0.3, 1.5], [0.5, 1.3], [1, 1]]
+      .map(([x, p]) => [x, p > 1 ? 1 + (p - 1) * (MAX_PITCH - 1) / 0.6 : p]); // 0.6 = old peak (1.6) - 1
+    // Smooth monotone cubic (Fritsch-Carlson) through the points, baked into a lookup table once
+    // so the audio scheduler only does an O(1) lookup.
+    const pitchCurve = (() => {
+      const n = PITCH_POINTS.length, x = PITCH_POINTS.map(p => p[0]), y = PITCH_POINTS.map(p => p[1]);
+      const h = [], d = [], m = new Array(n), N = 1000, lut = new Float32Array(N + 1);
+      for (let i = 0; i < n - 1; i++) { h[i] = x[i + 1] - x[i]; d[i] = (y[i + 1] - y[i]) / h[i]; }
+      m[0] = d[0]; m[n - 1] = d[n - 2];
+      for (let i = 1; i < n - 1; i++) {
+        if (d[i - 1] * d[i] <= 0) { m[i] = 0; continue; } // turning point: flat tangent, no overshoot
+        const w1 = 2 * h[i] + h[i - 1], w2 = h[i] + 2 * h[i - 1];
+        m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+      }
+      for (let j = 0, k = 0; j <= N; j++) {
+        const r = j / N;
+        while (k < n - 2 && r > x[k + 1]) k++;
+        const t = (r - x[k]) / h[k], t2 = t * t, t3 = t2 * t;
+        lut[j] = (2 * t3 - 3 * t2 + 1) * y[k] + (t3 - 2 * t2 + t) * h[k] * m[k] +
+                 (-2 * t3 + 3 * t2) * y[k + 1] + (t3 - t2) * h[k] * m[k + 1];
+      }
+      return r => {
+        const f = Math.min(1, Math.max(0, r)) * N, i = Math.min(N - 1, Math.floor(f));
+        return lut[i] + (lut[i + 1] - lut[i]) * (f - i);
+      };
+    })();
+
+    // 8-bit synthwave loop (Web Audio). Pitch and tempo follow pitchCurve (like tape speed).
+    // The game loop only updates a counter; a separate timer schedules notes a little ahead.
+    const music = (() => {
+      // Lead scales in semitones from the key root, over two octaves
+      const PENT = [0, 3, 5, 7, 10, 12, 15, 17, 19], NAT = [0, 2, 3, 5, 7, 8, 10, 12, 14, 15, 17, 19];
+      const HARM = [0, 2, 3, 5, 7, 8, 11, 12, 14, 15, 17, 19];  // only over the progression with the E major chord
+      const MIN = [0, 3, 7], MAJ = [0, 4, 7];
+      // Four-bar progressions as [root offset from the key's A2 (MIDI 45), chord]
+      const PROGS = [
+        [[0, MIN], [-4, MAJ], [-9, MAJ], [-2, MAJ]],      // Am F C G
+        [[0, MIN], [3, MAJ], [-2, MAJ], [-4, MAJ]],       // Am C G F
+        [[0, MIN], [-5, MIN], [-4, MAJ], [-2, MAJ]],      // Am Em F G
+        [[0, MIN], [-4, MAJ], [-7, MIN], [-5, MAJ]],      // Am F Dm E
+        [[0, MIN], [-2, MAJ], [-4, MAJ], [-5, MAJ]],      // Am G F E
+        [[0, MIN], [-7, MIN], [-2, MAJ], [3, MAJ]],       // Am Dm G C
+        [[0, MIN], [-4, MAJ], [-2, MAJ], [0, MIN]],       // Am F G Am
+        [[0, MIN], [3, MAJ], [-4, MAJ], [-5, MAJ]]        // Am C F E
+      ];
+      const ARPS = [[0, 1, 2, 1], [0, 2, 1, 2], [2, 1, 0, 1], [0, 1, 2, 3]]; // chord tone per 16th (3 = octave)
+      const KICKS = [[0, 4, 8, 12], [0, 6, 8, 14], [0, 4, 10, 12]];
+      // Which 16th steps of the bar play the bass / the lead
+      const BASS_RHYTHMS = [
+        [0, 2, 4, 6, 8, 10, 12, 14],                      // steady eighths
+        [0, 3, 6, 8, 11, 14],                             // off-beat
+        [0, 2, 3, 6, 8, 10, 11, 14],                      // gallop
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] // driving sixteenths
+      ];
+      const LEAD_RHYTHMS = [
+        [0, 4, 8, 12],                                    // on the beat
+        [0, 3, 6, 8, 11, 14],                             // syncopated
+        [0, 2, 4, 8, 10, 12],                             // off-beat pickups
+        [0, 6, 8, 12]                                     // sparse
+      ];
+      // Instrument presets: oscillator layers (octave offset, detune in cents, relative volume) and
+      // note length in 16ths. Each round picks one of each part.
+      const BASSES = [
+        { layers: [{ type: 'sawtooth' }], len: 1.8 },                                    // classic saw bass
+        { layers: [{ type: 'square' }, { type: 'sine', oct: -12 }], len: 1.8 },          // square + sub
+        { layers: [{ type: 'sawtooth', detune: -10 }, { type: 'sawtooth', detune: 10 }], len: 1.2 } // thick, punchy
+      ];
+      const ARPS_INST = [
+        { layers: [{ type: 'square' }], len: 0.9 },                                      // chip pluck
+        { layers: [{ type: 'triangle' }], len: 1.6 },                                    // soft bell
+        { layers: [{ type: 'sawtooth', detune: -7 }, { type: 'sawtooth', detune: 7 }], len: 0.7 } // bright pluck
+      ];
+      const LEAD_INST = [
+        { layers: [{ type: 'square' }], len: 3 },                                        // chiptune lead
+        { layers: [{ type: 'triangle' }], len: 3 },                                      // mellow lead
+        { layers: [{ type: 'sawtooth', detune: -9 }, { type: 'sawtooth', detune: 9 }], len: 3 }, // supersaw
+        { layers: [{ type: 'square' }, { type: 'square', oct: 12, vol: 0.4 }], len: 3 }  // octave square
+      ];
+      const pick = a => a[Math.floor(Math.random() * a.length)];
+      let v, leadIdx, fillNow; // this round's variation, chosen in start()
+      function randomize() {
+        v = {
+          key: Math.floor(Math.random() * 10) - 5,        // transpose -5..+4 semitones
+          prog: pick(PROGS), arp: pick(ARPS), kicks: pick(KICKS),
+          bass: pick(BASSES), arpInst: pick(ARPS_INST), lead: pick(LEAD_INST),
+          pad: Math.random() < 0.6,                       // slow detuned-saw chord pad
+          snare: pick(['snare', 'clap']),
+          cutoff: 2500 + Math.random() * 1500,            // overall brightness
+          leadP: 0.55 + Math.random() * 0.3,              // how often the lead plays
+          hat: pick([1, 2]),                              // hi-hat every 16th or every 8th
+          bassSteps: pick(BASS_RHYTHMS), leadSteps: pick(LEAD_RHYTHMS),
+          fillP: pick([0, 0.5, 0.9]),                     // chance of a snare fill at the end of each 4 bars
+          step: 60 / (96 + Math.random() * 20) / 4        // 96-116 bpm, as one 16th note
+        };
+        // harmonic minor only fits when the progression has an E major chord
+        const scales = [PENT, NAT];
+        if (v.prog.some(([off, chord]) => off === -5 && chord === MAJ)) scales.push(HARM);
+        v.scale = pick(scales);
+        leadIdx = Math.floor(Math.random() * v.scale.length);
+        fillNow = false;
+      }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const LOOKAHEAD = 0.25, TICK_MS = 50;
+      let ctx, master, filter, noise, timer, nextTime = 0, step = 0, total = 1, gone = 0, pitch = 1;
+      const freq = m => 440 * Math.pow(2, (m - 69) / 12) * pitch;
+
+      function note(type, f, t, dur, vol, dest, detune = 0, attack = 0) {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = type; o.frequency.value = f; o.detune.value = detune;
+        if (attack) { // slow fade-in for pads
+          g.gain.setValueAtTime(0.0001, t);
+          g.gain.exponentialRampToValueAtTime(vol, t + attack);
+        } else {
+          g.gain.setValueAtTime(vol, t);
+        }
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(dest);
+        o.start(t); o.stop(t + dur + 0.02);
+      }
+      function play(inst, midi, t, len, vol) { // all layers of an instrument through the tone filter
+        const each = vol / Math.sqrt(inst.layers.length);
+        for (const l of inst.layers) {
+          note(l.type, freq(midi + (l.oct || 0)), t, len * inst.len, each * (l.vol || 1), filter, l.detune || 0);
+        }
+      }
+      function hit(t, dur, vol, type, cutoff) { // noise burst for hats and snare
+        const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+        s.buffer = noise; f.type = type; f.frequency.value = cutoff;
+        g.gain.setValueAtTime(vol, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        s.connect(f); f.connect(g); g.connect(master);
+        s.start(t); s.stop(t + dur + 0.02);
+      }
+      function kick(t) {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.setValueAtTime(140, t);
+        o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+        g.gain.setValueAtTime(0.9, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+        o.connect(g); g.connect(master);
+        o.start(t); o.stop(t + 0.22);
+      }
+      function schedule(t, s, len) { // len = length of one 16th note at the current tempo
+        const bar = (s >> 4) & 3, i = s & 15, [off, tones] = v.prog[bar], root = 45 + v.key + off;
+        if (i === 0 && v.pad) { // one sustained chord per bar
+          for (const tone of tones) {
+            note('sawtooth', freq(root + 24 + tone), t, len * 16, 0.03, filter, -8, len * 6);
+            note('sawtooth', freq(root + 24 + tone), t, len * 16, 0.03, filter, 8, len * 6);
+          }
+        }
+        if (v.bassSteps.includes(i)) play(v.bass, root + (i % 8 === 6 ? 12 : 0), t, len, v.bassSteps.length > 8 ? 0.2 : 0.3);
+        const a = v.arp[i % 4];
+        play(v.arpInst, root + 24 + (a < 3 ? tones[a] : 12) + (i % 8 >= 4 ? 12 : 0), t, len, 0.08);
+        if (v.leadSteps.includes(i) && Math.random() < v.leadP) { // lead: a random walk along the key's scale, so it sounds like a melody
+          leadIdx = Math.min(v.scale.length - 1, Math.max(0, leadIdx + pick([-2, -1, -1, 0, 1, 1, 2])));
+          play(v.lead, 45 + v.key + 24 + v.scale[leadIdx], t, len, 0.1);
+        }
+        if (bar === 3 && i === 12) fillNow = Math.random() < v.fillP;
+        if (bar === 3 && fillNow && i >= 12) hit(t, 0.08, 0.1 + 0.04 * (i - 12), 'bandpass', 1800); // snare roll, getting louder
+        if (v.kicks.includes(i)) kick(t);
+        if (i % 8 === 4) {
+          if (v.snare === 'clap') { // three quick noise bursts
+            for (let k = 0; k < 3; k++) hit(t + k * 0.012, 0.07, 0.16, 'bandpass', 1200);
+          } else {
+            hit(t, 0.12, 0.25, 'bandpass', 1800);
+          }
+        }
+        if (i % v.hat === 0) hit(t, 0.04, v.hat === 1 ? 0.035 : 0.06, 'highpass', 8000);
+      }
+      function stop() { // fade out and stop scheduling
+        if (!ctx) return;
+        clearInterval(timer);
+        master.gain.setTargetAtTime(0, ctx.currentTime, 0.4);
+      }
+      function tick() {
+        const remaining = (total - gone) / total;
+        if (remaining <= MUSIC_END_FRAC) { stop(); return; }
+        const target = pitchCurve(remaining);
+        while (nextTime < ctx.currentTime + LOOKAHEAD) {
+          pitch += (target - pitch) * 0.3; // ease towards the curve so pitch never jumps
+          const len = v.step / pitch;
+          schedule(nextTime, step++, len);
+          nextTime += len;
+        }
+      }
+      return {
+        get steps() { return step; },
+        start(letterTotal) {
+          if (!AC) return;
+          if (!ctx) {
+            ctx = new AC();
+            const comp = ctx.createDynamicsCompressor();
+            master = ctx.createGain(); filter = ctx.createBiquadFilter();
+            filter.type = 'lowpass'; filter.frequency.value = 3000;
+            filter.connect(master); master.connect(comp); comp.connect(ctx.destination);
+            noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+            const d = noise.getChannelData(0);
+            for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+          }
+          ctx.resume();
+          total = Math.max(1, letterTotal); gone = 0; step = 0; pitch = 1; randomize(); filter.frequency.value = v.cutoff;
+          master.gain.cancelScheduledValues(ctx.currentTime);
+          master.gain.setTargetAtTime(0.5, ctx.currentTime, 0.05);
+          nextTime = ctx.currentTime + 0.05;
+          clearInterval(timer);
+          timer = setInterval(tick, TICK_MS);
+        },
+        stop,
+        deleted(n) { gone += typeof n === "number" ? n : n.length; } // silent; only drives the tempo
+      };
+    })();
+
+    // Finale: once the music pitch drops below ASSEMBLE_PITCH, a random half of the leftover pieces leave the physics (the rest keep floating),
+    // split into single letters, grow to TARGET_SIZE and glide to the centre of the screen in x order.
+    // The best-matching city (alignCity) is then chosen: letters that fit it stay, the rest are
+    // deleted, the stayers slide together into the word, missing letters glow in, the letters turn into
+    // capitals one by one, then the word grows gradually while fading out and "press space" returns. The music follows the letter count by treating
+    // the letters as going away from the moment the deleting starts.
+    const ASSEMBLE_PITCH = 0.5, TARGET_SIZE = 32, BUMP_SCALE = 3, NEW_COLOR = '#f4eaff';
+    const T_GATHER = 2000, T_DELETE = 600, T_SLIDE = 800, T_FILL = 500;
+    const T_CAP = 90, T_BEAT = 0, T_GROW = 2000; // capitals one by one, then the finished name stays 2s while it grows and fades
+    let lettersTotal = 1, lettersGone = 0, assembly = null, finaleStarted = false;
+    const ease = e => { e = Math.min(1, Math.max(0, e)); return e < 0.5 ? 4 * e * e * e : 1 - Math.pow(-2 * e + 2, 3) / 2; };
+
+    // Align the leftover letters s against a city name (letters only) and score the fit.
+    // Matching a letter +3, a missing city letter -2, a leftover letter skipped between two
+    // matches -1; leftover letters before/after the match are free. Returns the score and
+    // keep: leftover index -> city letter index.
+    function alignCity(s, city) {
+      const n = s.length, m = city.length, NEG = -1e9;
+      const sc = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(NEG));
+      const bk = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+      for (let i = 0; i <= n; i++) sc[i][0] = 0;
+      for (let j = 1; j <= m; j++) {
+        for (let i = 0; i <= n; i++) {
+          let best = NEG, from = 0;
+          if (sc[i][j - 1] > NEG) { best = sc[i][j - 1] - 2; from = 1; }                    // city letter missing
+          if (i > 0 && s[i - 1] === city[j - 1] && sc[i - 1][j - 1] > NEG && sc[i - 1][j - 1] + 3 > best) {
+            best = sc[i - 1][j - 1] + 3; from = 2;                                          // letter matches
+          }
+          if (i > 0 && j > 1 && sc[i - 1][j] > NEG && sc[i - 1][j] - 1 > best) {
+            best = sc[i - 1][j] - 1; from = 3;                                              // leftover letter skipped
+          }
+          sc[i][j] = best; bk[i][j] = from;
+        }
+      }
+      let bi = 0;
+      for (let i = 0; i <= n; i++) if (sc[i][m] > sc[bi][m]) bi = i;
+      const keep = new Map();
+      for (let i = bi, j = m; j > 0;) {
+        const from = bk[i][j];
+        if (from === 2) { keep.set(i - 1, j - 1); i--; j--; } else if (from === 3) i--; else j--;
+      }
+      return { score: sc[bi][m], keep };
+    }
+
+    function startAssembly(now) {
+      finaleStarted = true;
+      // a random half of the leftover pieces is picked for the finale; the rest keep floating
+      const pool = words.slice().sort(() => Math.random() - 0.5);
+      const list = pool.slice(0, Math.max(1, Math.ceil(pool.length / 2))).sort((a, b) => a.body.position.x - b.body.position.x);
+      list.forEach(w => words.splice(words.indexOf(w), 1));
+      const W = innerWidth, H = innerHeight, cy = H / 2, gap = 2, glow = 8 + 10 * (TARGET_SIZE - MIN_SIZE) / (MAX_SIZE - MIN_SIZE);
+      // 1. break every piece into single letters, each starting where it sits inside its piece
+      const letters = [];
+      for (const word of list) {
+        const b = word.body, text = word.el.textContent, s = word.scale;
+        Composite.remove(engine.world, b);
+        const els = [...text].map(ch => makeEl(ch, word.size, word.col, word.shade));
+        const ws = els.map(e => e.offsetWidth), sum = ws.reduce((a, c) => a + c, 0);
+        const ux = Math.cos(b.angle), uy = Math.sin(b.angle), tilt = b.angle - Math.round(b.angle / (2 * Math.PI)) * 2 * Math.PI;
+        let cum = 0;
+        els.forEach((el, k) => {
+          const off = (cum + ws[k] / 2 - sum / 2) * s;
+          cum += ws[k];
+          if (text[k] === ' ') { el.remove(); return; }
+          el.style.setProperty('--glow', glow + 'px');
+          letters.push({
+            el, ch: text[k], size: word.size, w: ws[k], h: el.offsetHeight, kind: 'drop',
+            fx: b.position.x + ux * off, fy: b.position.y + uy * off, fa: tilt, fs: s, gs: TARGET_SIZE / word.size
+          });
+        });
+        word.el.remove();
+      }
+      // 2. gather row (x order, wrapping only if wider than the screen)
+      const widths = letters.map(l => l.w / l.size * TARGET_SIZE), maxW = W * 0.9, lineH = TARGET_SIZE * 1.15;
+      let row = [], rowW = 0;
+      const rows = [row];
+      letters.forEach((l, i) => {
+        if (row.length && rowW + gap + widths[i] > maxW) { row = []; rows.push(row); rowW = 0; }
+        rowW += (row.length ? gap : 0) + widths[i];
+        row.push(i);
+      });
+      rows.forEach((r, ri) => {
+        const total = r.reduce((s, i) => s + widths[i], 0) + gap * (r.length - 1);
+        let x = (W - total) / 2;
+        r.forEach(i => { letters[i].gx = x + widths[i] / 2; letters[i].gy = cy + (ri - (rows.length - 1) / 2) * lineH; x += widths[i] + gap; });
+      });
+      // 3. pick the city that fits the leftover letters best
+      const s = letters.map(l => l.ch.toLowerCase()).join('');
+      let best = null;
+      for (const name of cityNames) {
+        const a = alignCity(s, name.replace(/ /g, '').toLowerCase());
+        if (!best || a.score > best.score) best = { name, ...a };
+      }
+      // 4. final word layout: kept letters take their slots, missing letters are created
+      const slots = []; // {i: leftover index or -1, ch, space}
+      const byCityLetter = new Map([...best.keep].map(([i, j]) => [j, i]));
+      let j = 0;
+      for (const ch of best.name) slots.push(ch === ' ' ? { space: true } : { i: byCityLetter.has(j) ? byCityLetter.get(j) : -1, ch, j: j++ });
+      const items = letters.slice();
+      slots.forEach(sl => {
+        if (sl.space) return;
+        if (sl.i >= 0) { sl.item = letters[sl.i]; sl.item.kind = 'keep'; }
+        else {
+          const el = makeEl(sl.ch, TARGET_SIZE, NEW_COLOR, 0);
+          el.style.setProperty('--glow', glow + 'px');
+          el.style.opacity = 0;
+          items.push(sl.item = { el, ch: sl.ch, size: TARGET_SIZE, w: el.offsetWidth, h: el.offsetHeight, kind: 'new' });
+        }
+        const it = sl.item, up = makeEl(it.ch.toUpperCase(), it.size, NEW_COLOR, 0); // width once it is a capital
+        it.lowW = it.w; it.upW = up.offsetWidth; it.upper = false;
+        up.remove();
+      });
+      assembly = {
+        t0: now, items, slots, counted: 0, cy, cityName: best.name,
+        letters: list.reduce((n, w) => n + w.el.textContent.length, 0)
+      };
+    }
+
+    // Open a Google search for the finished city. Browsers often block pop-ups that are not opened by a
+    // click or key press, so if that happens a link is shown instead (hidden again on the next round).
+    const searchEl = document.getElementById('search');
+    function openSearch(city) {
+      const url = 'https://www.google.com/search?q=' + encodeURIComponent(city + ' city');
+      const win = window.open(url, '_blank');
+      if (win) { win.opener = null; return; }
+      searchEl.href = url;
+      searchEl.textContent = 'search Google for ' + city;
+      searchEl.classList.add('show');
+    }
+
+    function stepAssembly(now) {
+      const a = assembly, t = now - a.t0, W = innerWidth, cy = a.cy;
+      const nLetters = a.slots.filter(sl => !sl.space).length;
+      const tDel = T_GATHER, tSlide = tDel + T_DELETE, tFill = tSlide + T_SLIDE, tCap = tFill + T_FILL;
+      const tGrow = tCap + nLetters * T_CAP + T_BEAT, tEnd = tGrow + T_GROW;
+      const g = ease(t / T_GATHER), del = ease((t - tDel) / T_DELETE), slide = ease((t - tSlide) / T_SLIDE);
+      const fill = ease((t - tFill) / T_FILL), u = Math.min(1, Math.max(0, (t - tGrow) / T_GROW));
+      const bump = 1 + (BUMP_SCALE - 1) * ease(u), fadeOut = 1 - Math.min(1, Math.max(0, (u - 0.2) / 0.8));
+      // capitals appear one letter at a time, left to right; the word re-centres as letters widen
+      const capN = t < tCap ? 0 : Math.floor((t - tCap) / T_CAP) + 1;
+      let k = 0;
+      for (const sl of a.slots) {
+        if (sl.space) continue;
+        const it = sl.item;
+        if (k++ < capN && !it.upper) { it.upper = true; it.el.textContent = it.ch.toUpperCase(); it.w = it.upW; }
+      }
+      const slotW = a.slots.map(sl => sl.space ? TARGET_SIZE * 0.3 : sl.item.w / sl.item.size * TARGET_SIZE);
+      let sx = (W - slotW.reduce((s, w) => s + w, 0)) / 2;
+      a.slots.forEach((sl, i) => { if (!sl.space) sl.item.tx = sx + slotW[i] / 2; sx += slotW[i]; });
+      for (const it of a.items) {
+        let x, y, ang = 0, sc, op = 1;
+        if (it.kind === 'new') {
+          x = it.tx; y = cy; sc = 0.6 + 0.4 * fill; op = fill * fadeOut;
+        } else {
+          x = it.fx + (it.gx - it.fx) * g; y = it.fy + (it.gy - it.fy) * g;
+          ang = it.fa * (1 - g); sc = it.fs + (it.gs - it.fs) * g;
+          if (it.kind === 'keep') { x += (it.tx - it.gx) * slide; y += (cy - it.gy) * slide; op = fadeOut; }
+          else { op = 1 - del; sc *= 1 - 0.4 * del; }
+        }
+        x = W / 2 + (x - W / 2) * bump; y = cy + (y - cy) * bump; sc *= bump; // scale the word about its centre
+        it.el.style.transform = 'translate(' + (x - it.w / 2) + 'px,' + (y - it.h / 2) + 'px) rotate(' + ang + 'rad) scale(' + sc + ')';
+        it.el.style.opacity = op;
+      }
+      // the music follows the letter count: letters count as gone between deleting and the end
+      const gone = Math.round(Math.min(1, Math.max(0, (t - tDel) / (tEnd - tDel))) * a.letters);
+      if (gone > a.counted) { lettersGone += gone - a.counted; music.deleted(gone - a.counted); a.counted = gone; }
+      if (t >= tEnd) { // the word has grown and faded out: "press space" returns
+        a.items.forEach(it => it.el.remove());
+        assembly = null;
+        openSearch(a.cityName);
+      }
+    }
+
+    let state = 'ready', last = 0, acc = 0; // 'ready' (waiting for space) or 'running'
+    function loop(now) {
+      if (state !== 'running') return;
+      const dt = now - last;
+      last = now;
+      acc = Math.min(acc + dt, 100);
+      while (acc >= STEP) {
+        for (const w of words) { // vapor rises: buoyancy beats gravity, more so as it shrinks
+          if (w.vapor) Body.applyForce(w.body, w.body.position, { x: 0, y: -w.body.mass * 0.001 * w.lift });
+        }
+        Engine.update(engine, STEP);
+        acc -= STEP;
+      }
+      toBreak.forEach((cuts, w) => breakWord(w, cuts));
+      toBreak.clear();
+      for (const w of words.slice()) {
+        const b = w.body;
+        if ((w.vapor || w.started) && b.bounds.min.y <= 0) { // reached the top of the screen: gone for good
+          lettersGone += w.el.textContent.length; music.deleted(w.el.textContent); removeWord(w); continue;
+        }
+        if (!w.started) {
+          if (w.landed && b.speed < STILL_SPEED && Math.abs(b.angularSpeed) < 0.01) w.settle += dt;
+          if (w.settle >= SETTLE_MS) w.started = true;
+        } else {
+          w.age += dt;
+          const t = Math.min(1, w.age / BRIGHTEN_MS);
+          if (t !== w.shade) { w.shade = t; w.el.style.color = color(w.col, t); }
+          const s = 1 - w.rate * w.age / SHRINK_MS;
+          if (s <= GONE_SCALE) { lettersGone += w.el.textContent.length; music.deleted(w.el.textContent); removeWord(w); continue; }
+          if (s <= w.vaporAt) {
+            if (!w.vapor) { w.vapor = true; b.frictionAir = 0.05; }
+            w.lift = 1.2 + 2.8 * Math.min(1, (w.vaporAt - s) / (w.vaporAt - GONE_SCALE));
+          }
+          Body.scale(b, s / w.scale, s / w.scale);
+          w.scale = s;
+        }
+        render(w);
+      }
+      const remaining = (lettersTotal - lettersGone) / lettersTotal;
+      if (!finaleStarted && words.length && remaining < 0.1 && pitchCurve(remaining) < ASSEMBLE_PITCH) startAssembly(now);
+      if (assembly) stepAssembly(now);
+      if (words.length || assembly) {
+        requestAnimationFrame(loop);
+      } else {
+        state = 'ready';
+        music.stop();
+        greetingEl.classList.remove('hidden');
+      }
+    }
+
+    addEventListener('keydown', e => {
+      if (e.code !== 'Space') return;
+      e.preventDefault();
+      if (e.repeat || state !== 'ready') return;
+      if (!words.length) spawnCities();
+      state = 'running';
+      lettersTotal = Math.max(1, words.reduce((n, w) => n + w.el.textContent.length, 0));
+      lettersGone = 0;
+      assembly = null;
+      finaleStarted = false;
+      searchEl.classList.remove('show');
+      music.start(lettersTotal);
+      greetingEl.classList.add('hidden');
+      last = performance.now();
+      acc = 0;
+      requestAnimationFrame(loop);
+    });
+  </script>
+</body>
+</html>
